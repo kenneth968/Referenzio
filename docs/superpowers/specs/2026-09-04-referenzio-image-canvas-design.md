@@ -1,5 +1,7 @@
 # Referenzio Image Canvas — Version 1 Design
 
+> **Preflight correction (2026-09-05):** Tooling uses `jsdom` `29.0.1`, replacing `30.0.1` because available Node `v24.14.0` does not satisfy the latter's `^24.15.0` minimum. The replacement supports `>=24.0.0`.
+
 Date: 2026-09-04  
 Status: Approved in chat
 
