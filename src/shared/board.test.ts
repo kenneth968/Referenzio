@@ -3,7 +3,7 @@ import {
   addItems, deleteItem, emptyBoard, fitBoardCamera, fitInitialImageSize, moveItem,
   reorderItem, resizeItem, worldPointForScreenPoint, zoomAtPoint,
 } from './board';
-import { BoardDocumentSchema, DropRequestSchema, MAX_SCALE, MIN_SCALE } from './contracts';
+import { BoardDocumentSchema, DropRequestSchema, MAX_SCALE, MIN_SCALE, PasteRequestSchema } from './contracts';
 
 const asset = {
   id: '11111111-1111-4111-8111-111111111111', filename: '11111111-1111-4111-8111-111111111111.png',
@@ -103,5 +103,9 @@ describe('contract schemas', () => {
     expect(DropRequestSchema.safeParse(['\\\\?\\C:\\images\\one.png']).success).toBe(false);
     expect(DropRequestSchema.safeParse(['images\\one.png']).success).toBe(false);
     expect(DropRequestSchema.safeParse(Array.from({ length: 33 }, (_, index) => `C:\\${index}.png`)).success).toBe(false);
+  });
+
+  it('accepts the payload-less clipboard paste invocation', () => {
+    expect(PasteRequestSchema.safeParse(undefined).success).toBe(true);
   });
 });

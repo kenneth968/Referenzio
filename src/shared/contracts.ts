@@ -110,7 +110,7 @@ export const LoadBoardResultSchema = z.object({
 export const ShortcutStatusSchema = z.object({ registered: z.boolean(), message: z.string().nullable() });
 export const RuntimeStatusSchema = z.object({ alwaysOnTop: z.boolean(), shortcut: ShortcutStatusSchema });
 
-export const PasteRequestSchema = z.object({}).strict();
+export const PasteRequestSchema = z.void();
 export const DropRequestSchema = z.array(z.string().max(32_767).regex(/^[A-Za-z]:[\\/]/, 'expected a Windows drive-letter absolute path')).min(1).max(32);
 export const SaveBoardRequestSchema = BoardDocumentSchema;
 export const SetPinnedRequestSchema = z.object({ value: z.boolean() }).strict();
