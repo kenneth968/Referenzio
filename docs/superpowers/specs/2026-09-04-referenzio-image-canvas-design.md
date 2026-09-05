@@ -3,6 +3,18 @@
 Date: 2026-09-04  
 Status: Approved in chat
 
+## Functionality Amendment — 2026-09-05
+
+The requested second planning pass adds the following behavior and acceptance detail to version 1. This amendment governs the corresponding passages below; application implementation has not started.
+
+1. **Reach and recover the view:** Space-drag pans over images as well as empty canvas. `Fit board` and canvas-focused `Home` center all placement bounds, including missing-image placeholders, within 24 CSS pixels of padding where the `[0.1, 4]` scale range permits. On an empty board they reset the default camera. These operations change only camera state. Cancel transient item gestures on lost focus; returning from another app restores canvas focus so immediate paste works.
+2. **Usable placement and batch import:** Initial image size fits the measured canvas viewport as well as the 640×480 CSS-pixel ceiling, preserves displayed aspect ratio (including JPEG orientation), and never enlarges source dimensions. Capture placement when input is accepted; completion merges into the latest board. A single 50-file drop works through sequential IPC batches of at most 32, reports progress and every rejected input, and retains earlier successes if a later batch fails. Space-drag and ordinary editing remain available while import runs.
+3. **Reliable state transitions:** No import or edit is accepted until a board loads successfully; failed load has `Retry load`. Saved status compares the acknowledged revision with the latest in-memory revision, including pending camera changes. Close temporarily suspends new mutations, drains accepted imports, and flushes their placements before destroying the window. A failed or timed-out close keeps the window usable; retry does not duplicate imports. Successful retry clears obsolete save-failure notices.
+4. **Repeatable recovery:** If primary is missing or invalid, try the backup before an empty board. Recovery writes the validated backup to primary without replacing the good backup; equal-revision retry must repair a failed primary write. Preserve damaged files and report recovery. Permission/I/O errors must not be treated as corrupt data or authorize an empty overwrite. Closing and launching again without edits must preserve recovered work. Missing or failed-to-decode images have selectable, removable placeholders.
+5. **Evidence of functionality:** Packaged-app acceptance drives the real canvas for move, proportional resize, pan, zoom, Fit board, reorder/delete, and restart checks. Rotation is explicitly disabled. The manual 50-image test records hardware/display scale and, after warm-up, a 10-second pan/zoom trace with p95 frame intervals below 50 ms and no stall above 500 ms. Missing Windows desktop access is recorded as `NOT RUN`, not a pass. Clipboard, native drop, global shortcut, installer, and native window behavior still require the Windows acceptance pass.
+
+The original exclusions remain in force. The exact dependency pins live in the implementation plan and require an install/engine/peer compatibility preflight; this amendment does not certify their availability.
+
 ## Goal
 
 Referenzio is a lightweight Windows desktop reference board. The user can copy an image from Windows Snipping Tool or a browser, paste it into a floating canvas, arrange and resize it, and trust that the canvas will return exactly as it was after closing or crashing.
@@ -23,7 +35,7 @@ Version 1 provides:
 - Explicit clipboard-image paste with `Ctrl+V`.
 - Drag-and-drop import for local raster image files.
 - App-owned copies of all imported images.
-- Canvas pan and pointer-centered zoom.
+- Canvas pan, pointer-centered zoom, and Fit board/Home view recovery.
 - Image selection, movement, aspect-ratio-preserving resize, deletion, and front/back ordering.
 - A resizable frameless floating window with an optional always-on-top state.
 - A fixed global show/hide shortcut: `Ctrl+Shift+Space`.
@@ -79,7 +91,7 @@ The main process never accepts arbitrary filesystem paths or commands from the r
 A small preload script exposes a typed API through Electron's context bridge. It contains only the operations the renderer needs, such as:
 
 - `loadBoard()`
-- `pasteClipboardImage(placement)`
+- `pasteClipboardImage()` (the renderer captures and applies placement)
 - `importDroppedImages(files)`
 - `saveBoard(board)`
 - `setPinned(value)`
@@ -178,7 +190,8 @@ Each imported item is positioned at the translated canvas drop point with a smal
 
 ## Canvas Interaction
 
-- Dragging empty canvas space pans the camera.
+- Dragging empty canvas space or holding Space while dragging over images pans the camera.
+- `Fit board` or canvas-focused `Home` frames all placements without changing them.
 - The mouse wheel or trackpad zooms around the pointer, clamped to a safe minimum and maximum.
 - Clicking an image selects it and exposes corner resize handles.
 - Dragging a selected image moves it.
@@ -219,7 +232,7 @@ For a board save, the persistence service:
 
 Rapid state changes may be coalesced, but a newer revision can never be overwritten by an older queued save. Paste, drop, delete, and completed transforms request an immediate save. Camera and window changes use a short debounce and flush when the window closes normally.
 
-On startup, Referenzio validates `board.json`. If it is absent, the app creates an empty in-memory board. If it is invalid, the app validates and loads `board.backup.json`, preserves the damaged file for inspection, and informs the user that recovery occurred. If both snapshots are invalid, the app opens an empty board without deleting any assets and reports where the damaged files are located.
+On startup, Referenzio validates `board.json`. If it is absent or invalid, the app validates and loads `board.backup.json`, preserves any damaged primary for inspection, repairs the primary from the valid backup, and informs the user that recovery occurred. If neither snapshot contains a valid board, the app opens an empty board without deleting any assets and reports damaged files when present. Permission or I/O failures produce a retryable load error instead of an empty replacement.
 
 A crash between asset creation and board commit can leave an unreferenced asset, which is harmless and intentionally retained. A board snapshot is never committed before all assets it references are durable.
 
