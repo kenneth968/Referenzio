@@ -1,0 +1,7 @@
+node_modules/
+out/
+.vite/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.superpowers/sdd/
