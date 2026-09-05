@@ -14,6 +14,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 let png = Buffer.alloc(0);
 const ids = ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003'];
 type MemoryPersistence = { writeAsset: ReturnType<typeof vi.fn>; assetPath(filename: string): string };
+type CapturedImage = { isEmpty(): boolean; getSize(): { width: number; height: number }; toPNG(): Uint8Array };
 let root = '';
 let fixture = (name: string) => join(root, name);
 const mockedLstat = vi.mocked(lstat);
@@ -35,7 +36,7 @@ function persistence(): MemoryPersistence {
 }
 
 function clipboard(buffer: Buffer | undefined) {
-  return { readImage: () => ({ isEmpty: () => buffer === undefined, getSize: () => ({ width: 1, height: 1 }), toPNG: () => buffer ?? Buffer.alloc(0) }) };
+  return { captureImage: async () => ({ isEmpty: () => buffer === undefined, getSize: () => ({ width: 1, height: 1 }), toPNG: () => buffer ?? Buffer.alloc(0) }) };
 }
 
 beforeAll(async () => {
@@ -98,6 +99,20 @@ describe('asset service', () => {
     const result = await assets.pasteClipboardImage();
     expect(result).toMatchObject({ ok: true, value: { filename: `${ids[0]}.png`, mediaType: 'image/png', pixelWidth: 1, pixelHeight: 1 } });
     await expect(readFile(store.assetPath(`${ids[0]}.png`))).resolves.toEqual(png);
+  });
+
+  it('awaits asynchronous clipboard capture before ingesting its image', async () => {
+    const store = persistence();
+    let release!: (value: CapturedImage) => void;
+    const nativeClipboard = { captureImage: vi.fn(() => new Promise<CapturedImage>((resolve) => { release = resolve; })) };
+    const image: CapturedImage = { isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }), toPNG: () => png };
+    const assets = createAssetService({ persistence: store, clipboard: nativeClipboard, createId: () => ids[0] });
+
+    const paste = assets.pasteClipboardImage();
+    expect(store.writeAsset).not.toHaveBeenCalled();
+    release(image);
+    await expect(paste).resolves.toMatchObject({ ok: true, value: { filename: `${ids[0]}.png` } });
+    expect(nativeClipboard.captureImage).toHaveBeenCalledOnce();
   });
 
   it('does not write corrupt image payloads', async () => {
@@ -208,7 +223,10 @@ describe('asset service', () => {
     let releaseFirst: (() => void) | undefined;
     store.writeAsset.mockImplementationOnce(() => new Promise<Result<void>>((resolve) => { releaseFirst = () => resolve({ ok: true, value: undefined }); }));
     let captured = png;
-    const nativeClipboard = { readImage: () => ({ isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }), toPNG: () => captured }) };
+    const nativeClipboard = { captureImage: async () => {
+      const snapshot = captured;
+      return { isEmpty: () => false, getSize: () => ({ width: 1, height: 1 }), toPNG: () => snapshot };
+    } };
     let next = 0;
     const assets = createAssetService({ persistence: store, clipboard: nativeClipboard, createId: () => ids[next++] });
     const heldImport = assets.importDroppedImages([fixture('one-pixel.png')]);

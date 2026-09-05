@@ -1,8 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, net, protocol, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, nativeImage, net, protocol, screen, session } from 'electron';
 import started from 'electron-squirrel-startup';
 import path from 'node:path';
 import { createAssetService } from './assets';
-import type { AssetClipboard } from './assets';
 import { createPersistenceService } from './persistence';
 import { registerAssetProtocol } from './security/asset-protocol';
 import { installContentSecurityPolicy } from './security/content-security-policy';
@@ -14,6 +13,20 @@ protocol.registerSchemesAsPrivileged([{
 }]);
 
 let bootstrapped = false;
+
+export async function captureElectronClipboardImage(
+  electronClipboard: Pick<Electron.Clipboard, 'read'>,
+  images: Pick<typeof nativeImage, 'createFromBuffer'>,
+) {
+  const items = await electronClipboard.read();
+  for (const mediaType of ['image/png', 'image/jpeg']) {
+    const item = items.find((candidate) => candidate.types.includes(mediaType));
+    if (!item) continue;
+    const blob = await item.getType(mediaType) as Blob;
+    return images.createFromBuffer(Buffer.from(await blob.arrayBuffer()));
+  }
+  return undefined;
+}
 
 export function bootstrapApp(): void {
   if (bootstrapped) return;
@@ -41,7 +54,7 @@ export function bootstrapApp(): void {
       return;
     }
 
-    const assets = createAssetService({ persistence, clipboard: clipboard as unknown as AssetClipboard });
+    const assets = createAssetService({ persistence, clipboard: { captureImage: () => captureElectronClipboardImage(clipboard, nativeImage) } });
     void assets;
     registerAssetProtocol({ protocol, net, persistence });
     installContentSecurityPolicy(session.defaultSession, app.isPackaged);
