@@ -1,4 +1,4 @@
-import { access, readFile, rename } from 'node:fs/promises';
+import { access, open, readFile, rename, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
@@ -155,8 +155,17 @@ export class BoardStore {
     while (true) {
       const target = join(directory, `${stem}${attempt ? `-${attempt}` : ''}${extension}`);
       try {
-        await rename(this.paths.board, target);
-        return;
+        // Windows rename may replace an existing destination, so reserve this exact
+        // candidate exclusively before moving the damaged primary into it.
+        const reservation = await open(target, 'wx');
+        try {
+          await reservation.close();
+          await rename(this.paths.board, target);
+          return;
+        } catch (error) {
+          await rm(target, { force: true }).catch(() => undefined);
+          throw error;
+        }
       } catch (error: unknown) {
         if (isAlreadyExists(error)) {
           attempt += 1;

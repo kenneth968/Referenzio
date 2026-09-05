@@ -57,6 +57,18 @@ describe('persistence service', () => {
     await expect(readdir(root)).resolves.toContain('board.invalid-2026-09-04T12-00-00.000Z.json');
   });
 
+  it('preserves both damaged snapshots when the injected recovery timestamp already exists', async () => {
+    const { root, service } = await createService();
+    const collision = 'board.invalid-2026-09-04T12-00-00.000Z.json';
+    await writeFile(join(root, collision), '{older damaged snapshot}');
+    await writeFile(join(root, 'board.json'), '{newer damaged snapshot}');
+    await writeFile(join(root, 'board.backup.json'), JSON.stringify(validBoard({ revision: 7 })));
+
+    expect((await service.loadBoard()).recovery).toBe('backup');
+    expect(await readFile(join(root, collision), 'utf8')).toBe('{older damaged snapshot}');
+    expect(await readFile(join(root, 'board.invalid-2026-09-04T12-00-00.000Z-1.json'), 'utf8')).toBe('{newer damaged snapshot}');
+  });
+
   it('retains recovered work on a second launch without intervening edits', async () => {
     const { root, service } = await createService();
     const recovered = validBoard({ revision: 7 });
