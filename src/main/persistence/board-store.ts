@@ -119,6 +119,8 @@ export class BoardStore {
       const current = await this.readSnapshot(this.paths.board);
       if (current.kind === 'valid') {
         // The new primary is already flushed at this point. Only validated content becomes a backup.
+        const existingBackup = await this.readSnapshot(this.paths.backup);
+        if (existingBackup.kind === 'invalid') await this.preserveInvalidSnapshot(this.paths.backup);
         await writeDurableJson(this.paths.backup, JSON.stringify(current.document));
       } else if (current.kind === 'invalid') {
         await this.preserveInvalidPrimary();
@@ -147,10 +149,14 @@ export class BoardStore {
   }
 
   private async preserveInvalidPrimary(): Promise<void> {
+    await this.preserveInvalidSnapshot(this.paths.board);
+  }
+
+  private async preserveInvalidSnapshot(snapshotPath: string): Promise<void> {
     const timestamp = this.now().toISOString().replace(/:/g, '-');
-    const directory = dirname(this.paths.board);
+    const directory = dirname(snapshotPath);
     const extension = '.json';
-    const stem = `${basename(this.paths.board, extension)}.invalid-${timestamp}`;
+    const stem = `${basename(snapshotPath, extension)}.invalid-${timestamp}`;
     let attempt = 0;
     while (true) {
       const target = join(directory, `${stem}${attempt ? `-${attempt}` : ''}${extension}`);
@@ -160,7 +166,7 @@ export class BoardStore {
         const reservation = await open(target, 'wx');
         try {
           await reservation.close();
-          await rename(this.paths.board, target);
+          await rename(snapshotPath, target);
           return;
         } catch (error) {
           await rm(target, { force: true }).catch(() => undefined);

@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyBoard } from '../../shared/board';
 
-const atomicFault = vi.hoisted(() => ({ failPrimaryRepair: false }));
+const atomicFault = vi.hoisted(() => ({
+  failPrimaryRepair: false,
+  delayFirstSettingsWrite: false,
+  firstSettingsWriteStarted: undefined as (() => void) | undefined,
+  releaseFirstSettingsWrite: undefined as (() => void) | undefined,
+}));
 
 vi.mock('./atomic-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./atomic-file')>();
@@ -12,6 +17,11 @@ vi.mock('./atomic-file', async (importOriginal) => {
     ...actual,
     writeDurableJson: async (path: string, text: string) => {
       if (atomicFault.failPrimaryRepair && path.endsWith('board.json')) throw new Error('simulated primary repair failure');
+      if (atomicFault.delayFirstSettingsWrite && path.endsWith('settings.json')) {
+        atomicFault.delayFirstSettingsWrite = false;
+        atomicFault.firstSettingsWriteStarted?.();
+        await new Promise<void>((resolve) => { atomicFault.releaseFirstSettingsWrite = resolve; });
+      }
       return actual.writeDurableJson(path, text);
     },
   };
@@ -42,6 +52,9 @@ function validBoard({ revision = 0, withAsset = false }: { revision?: number; wi
 
 afterEach(async () => {
   atomicFault.failPrimaryRepair = false;
+  atomicFault.delayFirstSettingsWrite = false;
+  atomicFault.firstSettingsWriteStarted = undefined;
+  atomicFault.releaseFirstSettingsWrite = undefined;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -139,6 +152,20 @@ describe('persistence service', () => {
     expect(JSON.parse(await readFile(join(root, 'board.backup.json'), 'utf8')).revision).toBe(1);
   });
 
+  it('archives an invalid backup before rotating two later primary snapshots', async () => {
+    const { root, service } = await createService();
+    await writeFile(join(root, 'board.json'), JSON.stringify(validBoard({ revision: 1 })));
+    await writeFile(join(root, 'board.backup.json'), '{damaged backup bytes}');
+    await service.loadBoard();
+
+    await expect(service.saveBoard(validBoard({ revision: 2 }))).resolves.toMatchObject({ ok: true });
+    await expect(service.saveBoard(validBoard({ revision: 3 }))).resolves.toMatchObject({ ok: true });
+
+    expect(await readFile(join(root, 'board.backup.invalid-2026-09-04T12-00-00.000Z.json'), 'utf8')).toBe('{damaged backup bytes}');
+    expect(JSON.parse(await readFile(join(root, 'board.backup.json'), 'utf8')).revision).toBe(2);
+    expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8')).revision).toBe(3);
+  });
+
   it('rejects malformed boards without replacing the primary snapshot', async () => {
     const { root, service } = await createService();
     await service.saveBoard(validBoard({ revision: 1 }));
@@ -179,6 +206,37 @@ describe('persistence service', () => {
       .resolves.toMatchObject({ ok: false, error: { code: 'SETTINGS_SAVE_FAILED' } });
     await expect(service.writeAsset(`${assetId}.png`, new Uint8Array([1])))
       .resolves.toMatchObject({ ok: false, error: { code: 'ASSET_SAVE_FAILED' } });
+  });
+
+  it('retries initialization after a transient filesystem failure is repaired', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'referenzio-persistence-'));
+    roots.push(root);
+    const libraryFile = join(root, 'library-file');
+    await writeFile(libraryFile, 'not a directory');
+    const service = createPersistenceService({ libraryRoot: libraryFile, now });
+    expect(await service.saveSettings({ bounds: { x: 1, y: 2, width: 3, height: 4 }, alwaysOnTop: true }))
+      .toMatchObject({ ok: false, error: { code: 'SETTINGS_SAVE_FAILED' } });
+
+    await rm(libraryFile);
+    expect(await service.saveSettings({ bounds: { x: 5, y: 6, width: 7, height: 8 }, alwaysOnTop: false }))
+      .toMatchObject({ ok: true });
+    expect(await service.loadSettings()).toEqual({ bounds: { x: 5, y: 6, width: 7, height: 8 }, alwaysOnTop: false });
+  });
+
+  it('serializes overlapping settings saves so the latest bounds win', async () => {
+    const { service } = await createService();
+    let firstWriteStarted!: () => void;
+    const started = new Promise<void>((resolve) => { firstWriteStarted = resolve; });
+    atomicFault.firstSettingsWriteStarted = firstWriteStarted;
+    atomicFault.delayFirstSettingsWrite = true;
+
+    const older = service.saveSettings({ bounds: { x: 1, y: 2, width: 3, height: 4 }, alwaysOnTop: false });
+    await started;
+    const newer = service.saveSettings({ bounds: { x: 5, y: 6, width: 7, height: 8 }, alwaysOnTop: true });
+    atomicFault.releaseFirstSettingsWrite?.();
+    await Promise.all([older, newer]);
+
+    expect(await service.loadSettings()).toEqual({ bounds: { x: 5, y: 6, width: 7, height: 8 }, alwaysOnTop: true });
   });
 
   it('flushes the final queued revision', async () => {

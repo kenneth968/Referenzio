@@ -23,10 +23,14 @@ export function createPersistenceService({ libraryRoot, now = () => new Date() }
   let initialization: Promise<void> | undefined;
 
   const initialize = (): Promise<void> => {
-    initialization ??= Promise.all([
+    if (initialization) return initialization;
+    initialization = Promise.all([
       mkdir(paths.libraryRoot, { recursive: true }),
       mkdir(paths.assetsDirectory, { recursive: true }),
-    ]).then(() => undefined);
+    ]).then(() => undefined).catch((error) => {
+      initialization = undefined;
+      throw error;
+    });
     return initialization;
   };
   const boards = new BoardStore(paths, now, initialize);
