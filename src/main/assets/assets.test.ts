@@ -2,16 +2,22 @@ import { cp, lstat, mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import sharp from 'sharp';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { MAX_IMPORT_BYTES, MAX_IMPORT_PIXELS, type Result } from '../../shared/contracts';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { MAX_IMPORT_BYTES, type Result } from '../../shared/contracts';
 import { createAssetService as createAssetServiceImpl, type AssetServiceDependencies } from './asset-service';
-import { isWithinByteLimit, isWithinPixelLimit } from './image-inspector';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, lstat: vi.fn(original.lstat), readFile: vi.fn(original.readFile) };
+});
 
 let png = Buffer.alloc(0);
 const ids = ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003'];
 type MemoryPersistence = { writeAsset: ReturnType<typeof vi.fn>; assetPath(filename: string): string };
 let root = '';
 let fixture = (name: string) => join(root, name);
+const mockedLstat = vi.mocked(lstat);
+const mockedReadFile = vi.mocked(readFile);
 
 function createAssetService(dependencies: Omit<AssetServiceDependencies, 'persistence'> & { persistence: MemoryPersistence }) {
   return createAssetServiceImpl({ ...dependencies, persistence: dependencies.persistence as never });
@@ -39,11 +45,13 @@ beforeAll(async () => {
   await writeFile(fixture('not-an-image.png'), 'not an image');
   await sharp({ create: { width: 2, height: 1, channels: 3, background: 'red' } }).jpeg().toFile(fixture('small.jpg'));
   await sharp({ create: { width: 2, height: 1, channels: 4, background: 'red' } }).webp().toFile(fixture('small.webp'));
+  await sharp({ create: { width: 2, height: 3, channels: 3, background: 'red' } }).withMetadata({ orientation: 6 }).jpeg().toFile(fixture('oriented.jpg'));
   await writeFile(fixture('truncated.png'), png.subarray(0, 20));
   await mkdir(fixture('owned'));
   await mkdir(fixture('owned.png'));
 });
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
+afterEach(() => { mockedLstat.mockClear(); mockedReadFile.mockClear(); });
 
 describe('asset service', () => {
   it('copies a verified PNG before reporting it as imported', async () => {
@@ -70,6 +78,13 @@ describe('asset service', () => {
     const result = await assets.importDroppedImages([fixture('small.jpg'), fixture('small.webp')]);
     expect(result.imported.map(({ mediaType, filename }) => [mediaType, filename])).toEqual([['image/jpeg', `${ids[0]}.jpg`], ['image/webp', `${ids[1]}.webp`]]);
     await expect(readFile(store.assetPath(`${ids[0]}.jpg`))).resolves.toEqual(await readFile(fixture('small.jpg')));
+  });
+
+  it('uses EXIF orientation to expose browser-displayed JPEG dimensions', async () => {
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([fixture('oriented.jpg')])).resolves.toMatchObject({
+      imported: [{ pixelWidth: 3, pixelHeight: 2 }], rejected: [],
+    });
   });
 
   it('rejects an empty clipboard', async () => {
@@ -116,14 +131,51 @@ describe('asset service', () => {
     await expect(readFile(store.assetPath(result.imported[0].filename))).resolves.toEqual(png);
   });
 
-  it('declares the documented size and pixel boundaries', async () => {
-    expect(MAX_IMPORT_BYTES).toBe(104_857_600);
-    expect(MAX_IMPORT_PIXELS).toBe(40_000_000);
-    expect(isWithinByteLimit(MAX_IMPORT_BYTES)).toBe(true);
-    expect(isWithinByteLimit(MAX_IMPORT_BYTES + 1)).toBe(false);
-    expect(isWithinPixelLimit(8_000, 5_000)).toBe(true);
-    expect(isWithinPixelLimit(8_000, 5_001)).toBe(false);
-    await expect(lstat(fixture('not-an-image.png'))).resolves.toMatchObject({ isFile: expect.any(Function) });
+  it('reads a regular file at the exact 100 MiB boundary', async () => {
+    const source = 'C:\\virtual\\exact-limit.png';
+    mockedLstat.mockResolvedValueOnce({ isFile: () => true, size: MAX_IMPORT_BYTES } as never);
+    mockedReadFile.mockResolvedValueOnce(png as never);
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([source])).resolves.toMatchObject({ imported: [expect.any(Object)], rejected: [] });
+    expect(mockedReadFile).toHaveBeenCalledWith(source);
+  });
+
+  it('rejects a regular file above the 100 MiB boundary before reading it', async () => {
+    const source = 'C:\\virtual\\over-limit.png';
+    mockedLstat.mockResolvedValueOnce({ isFile: () => true, size: MAX_IMPORT_BYTES + 1 } as never);
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([source])).resolves.toEqual({
+      imported: [], rejected: [{ sourceName: 'over-limit.png', code: 'FILE_TOO_LARGE', message: 'The file is larger than the 100 MiB import limit.' }],
+    });
+    expect(mockedReadFile).not.toHaveBeenCalled();
+  });
+
+  it('imports a PNG at the exact 40,000,000-pixel decoded boundary', async () => {
+    const source = fixture('pixel-limit.png');
+    await sharp({ create: { width: 8_000, height: 5_000, channels: 4, background: 'red' } }).png().toFile(source);
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([source])).resolves.toMatchObject({
+      imported: [{ pixelWidth: 8_000, pixelHeight: 5_000 }], rejected: [],
+    });
+  });
+
+  it('rejects a PNG one row beyond the decoded pixel limit', async () => {
+    const source = fixture('pixel-limit-plus-one.png');
+    await sharp({ create: { width: 8_000, height: 5_001, channels: 4, background: 'red' } }).png().toFile(source);
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([source])).resolves.toMatchObject({
+      imported: [], rejected: [{ code: 'IMAGE_TOO_LARGE' }],
+    });
+  });
+
+  it('rejects a symlinked input through lstat before extension classification', async () => {
+    const source = 'C:\\virtual\\symlink-without-extension';
+    mockedLstat.mockResolvedValueOnce({ isFile: () => false, size: 0 } as never);
+    const assets = createAssetService({ persistence: persistence(), clipboard: clipboard(undefined), createId: () => ids[0] });
+    await expect(assets.importDroppedImages([source])).resolves.toEqual({
+      imported: [], rejected: [{ sourceName: 'symlink-without-extension', code: 'FILE_UNREADABLE', message: 'The file could not be read.' }],
+    });
+    expect(mockedReadFile).not.toHaveBeenCalled();
   });
 
   it('rejects directories without attempting an image write', async () => {

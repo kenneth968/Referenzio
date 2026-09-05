@@ -76,11 +76,11 @@ export function createAssetService({ persistence, clipboard, now = () => new Dat
 
   const importOne = async (path: string): Promise<{ asset?: Asset; rejected?: ImportBatchResult['rejected'][number] }> => {
     const sourceName = basename(path);
-    let type = imageTypeForPath(path);
-    if (!type) return { rejected: rejection(sourceName, 'UNSUPPORTED_FORMAT', 'Only PNG, JPEG, and WebP images can be imported.') };
     try {
       const stats = await lstat(path);
       if (!stats.isFile()) return { rejected: rejection(sourceName, 'FILE_UNREADABLE', 'The file could not be read.') };
+      const type = imageTypeForPath(path);
+      if (!type) return { rejected: rejection(sourceName, 'UNSUPPORTED_FORMAT', 'Only PNG, JPEG, and WebP images can be imported.') };
       if (!isWithinByteLimit(stats.size)) return { rejected: rejection(sourceName, 'FILE_TOO_LARGE', 'The file is larger than the 100 MiB import limit.') };
       const bytes = await readFile(path);
       if (!isWithinByteLimit(bytes.byteLength)) return { rejected: rejection(sourceName, 'FILE_TOO_LARGE', 'The file is larger than the 100 MiB import limit.') };
