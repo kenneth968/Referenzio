@@ -1,8 +1,22 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyBoard } from '../../shared/board';
+
+const atomicFault = vi.hoisted(() => ({ failPrimaryRepair: false }));
+
+vi.mock('./atomic-file', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./atomic-file')>();
+  return {
+    ...actual,
+    writeDurableJson: async (path: string, text: string) => {
+      if (atomicFault.failPrimaryRepair && path.endsWith('board.json')) throw new Error('simulated primary repair failure');
+      return actual.writeDurableJson(path, text);
+    },
+  };
+});
+
 import { createPersistenceService } from './index';
 
 const now = () => new Date('2026-09-04T12:00:00.000Z');
@@ -27,6 +41,7 @@ function validBoard({ revision = 0, withAsset = false }: { revision?: number; wi
 }
 
 afterEach(async () => {
+  atomicFault.failPrimaryRepair = false;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -61,6 +76,31 @@ describe('persistence service', () => {
     const result = await service.loadBoard();
     expect(result).toMatchObject({ recovery: 'backup', document: { revision: 4 } });
     expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).toMatchObject({ revision: 4 });
+  });
+
+  it('retries the same revision after backup repair initially fails', async () => {
+    const { root, service } = await createService();
+    const recovered = validBoard({ revision: 7 });
+    await writeFile(join(root, 'board.json'), '{broken');
+    await writeFile(join(root, 'board.backup.json'), JSON.stringify(recovered));
+    atomicFault.failPrimaryRepair = true;
+
+    expect(await service.loadBoard()).toMatchObject({ recovery: 'backup', document: { revision: 7 } });
+    expect(await service.flush()).toMatchObject({ ok: false, error: { code: 'BOARD_SAVE_FAILED' } });
+
+    atomicFault.failPrimaryRepair = false;
+    expect(await service.saveBoard(recovered)).toMatchObject({ ok: true, value: { revision: 7 } });
+    expect(await service.flush()).toMatchObject({ ok: true });
+    expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).toEqual(recovered);
+  });
+
+  it('propagates primary read I/O failures without creating an empty board', async () => {
+    const { root, service } = await createService();
+    await mkdir(join(root, 'board.json'));
+
+    await expect(service.loadBoard()).rejects.toMatchObject({ code: 'EISDIR' });
+    expect((await readdir(root)).includes('board.json')).toBe(true);
+    expect((await readdir(root)).some((entry) => entry.startsWith('board.invalid-'))).toBe(false);
   });
 
   it('selects primary, backup, or an empty board correctly', async () => {
@@ -114,6 +154,19 @@ describe('persistence service', () => {
     expect(await service.loadSettings()).toEqual({ bounds: { x: 100, y: 100, width: 1200, height: 800 }, alwaysOnTop: false });
     await expect(service.saveSettings({ bounds: { x: 1, y: 2, width: 3, height: 4 }, alwaysOnTop: true })).resolves.toMatchObject({ ok: true });
     expect(await service.loadSettings()).toEqual({ bounds: { x: 1, y: 2, width: 3, height: 4 }, alwaysOnTop: true });
+  });
+
+  it('returns Result failures when initialization cannot create a library directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'referenzio-persistence-'));
+    roots.push(root);
+    const libraryFile = join(root, 'library-file');
+    await writeFile(libraryFile, 'not a directory');
+    const service = createPersistenceService({ libraryRoot: libraryFile, now });
+
+    await expect(service.saveSettings({ bounds: { x: 1, y: 2, width: 3, height: 4 }, alwaysOnTop: true }))
+      .resolves.toMatchObject({ ok: false, error: { code: 'SETTINGS_SAVE_FAILED' } });
+    await expect(service.writeAsset(`${assetId}.png`, new Uint8Array([1])))
+      .resolves.toMatchObject({ ok: false, error: { code: 'ASSET_SAVE_FAILED' } });
   });
 
   it('flushes the final queued revision', async () => {

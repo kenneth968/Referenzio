@@ -49,15 +49,19 @@ export function createPersistenceService({ libraryRoot, now = () => new Date() }
       return settings.load();
     },
     async saveSettings(value) {
-      await initialize();
-      return settings.save(value);
+      try {
+        await initialize();
+        return await settings.save(value);
+      } catch {
+        return { ok: false, error: { code: 'SETTINGS_SAVE_FAILED', message: 'The window settings could not be saved.', action: 'retry-save' } };
+      }
     },
     async writeAsset(filename, bytes) {
-      await initialize();
       if (!isAssetFilename(filename)) {
         return { ok: false, error: { code: 'ASSET_INVALID', message: 'The asset filename is invalid and was not saved.', action: 'dismiss' } };
       }
       try {
+        await initialize();
         await writeDurableBytes(assetPath(filename), bytes);
         return { ok: true, value: undefined };
       } catch {
