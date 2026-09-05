@@ -1,10 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, globalShortcut, nativeImage, net, protocol, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, screen, session, shell } from 'electron';
 import started from 'electron-squirrel-startup';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createAssetService } from './assets';
 import { createPersistenceService } from './persistence';
 import { registerAssetProtocol } from './security/asset-protocol';
 import { installContentSecurityPolicy } from './security/content-security-policy';
+import { createRendererFlushCoordinator, registerIpcHandlers } from './ipc';
 import { createWindowController } from './window/controller';
 
 protocol.registerSchemesAsPrivileged([{
@@ -55,22 +57,38 @@ export function bootstrapApp(): void {
     }
 
     const assets = createAssetService({ persistence, clipboard: { captureImage: () => captureElectronClipboardImage(clipboard, nativeImage) } });
-    void assets;
     registerAssetProtocol({ protocol, net, persistence });
     installContentSecurityPolicy(session.defaultSession, app.isPackaged);
+
+    let mainWindow: BrowserWindow | undefined;
+    const flushRenderer = createRendererFlushCoordinator(ipcMain, () => mainWindow);
+    const sendToRenderer = <T>(channel: string, value: T): void => {
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(channel, value);
+    };
 
     const controller = createWindowController({
       BrowserWindow,
       screen,
       globalShortcut,
       persistence,
-      notifyShortcut: () => {},
-      notifyError: () => {},
-      // Task 6 replaces this seam with the renderer IPC flush coordinator.
-      flushRenderer: async () => ({ ok: true, value: undefined }),
+      notifyShortcut: (status) => sendToRenderer('app:shortcut-status', status),
+      notifyError: (error) => sendToRenderer('app:error', error),
+      flushRenderer,
       quit: () => app.quit(),
     });
-    await controller.createOrFocus();
+    registerIpcHandlers({
+      ipcMain,
+      persistence,
+      assets,
+      controller,
+      shell,
+      rendererUrl: typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'undefined'
+        ? pathToFileURL(path.join(__dirname, '../renderer', typeof MAIN_WINDOW_VITE_NAME === 'undefined' ? 'main_window' : MAIN_WINDOW_VITE_NAME, 'index.html')).href
+        : MAIN_WINDOW_VITE_DEV_SERVER_URL,
+    });
+    mainWindow = await controller.createOrFocus();
+    const runtimeStatus = controller.getRuntimeStatus();
+    if (!runtimeStatus.shortcut.registered) sendToRenderer('app:shortcut-status', runtimeStatus.shortcut);
 
     app.on('second-instance', () => { void controller.createOrFocus(); });
     app.on('activate', () => { void controller.createOrFocus(); });
