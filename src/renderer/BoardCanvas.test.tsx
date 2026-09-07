@@ -6,16 +6,18 @@ import type { BoardDocument } from '../shared/contracts';
 type MockNode = { id: () => string; x: () => number; y: () => number; width: () => number; scaleX: () => number; scaleY: () => number; scale: (value: { x: number; y: number }) => void; setGeometry: (value: Partial<{ x: number; y: number; width: number; scaleX: number; scaleY: number }>) => void };
 const nodeRefs = new Map<string, MockNode>();
 let transformerProps: Record<string, unknown> | undefined;
+let transformerNodes: unknown[][] = [];
 
 vi.mock('react-konva', () => {
   const Box = ({ children, scaleX, scaleY, x, y }: Record<string, unknown>) => <div data-camera-x={x as string} data-camera-y={y as string} data-camera-scale-x={scaleX as string} data-camera-scale-y={scaleY as string}>{children as React.ReactNode}</div>;
   const Stage = forwardRef(({ children, onWheel, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: Record<string, unknown>, ref) => {
     const pointer = useRef<{ x: number; y: number } | null>(null);
-    useImperativeHandle(ref, () => ({
+    const stage = useRef({
       getPointerPosition: () => pointer.current,
       container: () => window.document.createElement('div'),
-    }));
-    const event = (nativeEvent: Event) => ({ evt: nativeEvent, target: { getStage: () => ({ getPointerPosition: () => pointer.current }) } });
+    });
+    useImperativeHandle(ref, () => stage.current);
+    const event = (nativeEvent: Event) => ({ evt: nativeEvent, target: stage.current });
     const update = (nativeEvent: MouseEvent | PointerEvent | WheelEvent) => { pointer.current = { x: nativeEvent.clientX, y: nativeEvent.clientY }; };
     return <div data-testid="konva-stage"
       onWheel={(e: React.WheelEvent) => { update(e.nativeEvent); (onWheel as ((event: unknown) => void) | undefined)?.(event(e.nativeEvent)); }}
@@ -26,8 +28,10 @@ vi.mock('react-konva', () => {
     >{children as React.ReactNode}</div>;
   });
   const Image = forwardRef(({ id, children, onClick, onPointerDown, onDragEnd, onTransformEnd, ...props }: Record<string, unknown>, ref) => {
-    const geometry = { x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), scaleX: 1, scaleY: 1 };
-    const node: MockNode = { id: () => String(id), x: () => geometry.x, y: () => geometry.y, width: () => geometry.width, scaleX: () => geometry.scaleX, scaleY: () => geometry.scaleY, scale: (value: { x: number; y: number }) => { geometry.scaleX = value.x; geometry.scaleY = value.y; }, setGeometry: (value) => Object.assign(geometry, value) };
+    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), scaleX: 1, scaleY: 1 });
+    const nodeRef = useRef<MockNode | null>(null);
+    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: () => geometry.current.width, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, setGeometry: (value) => Object.assign(geometry.current, value) };
+    const node = nodeRef.current;
     if (id) nodeRefs.set(String(id), node);
     useImperativeHandle(ref, () => node);
     return <button data-testid={`image-${String(id)}`}
@@ -37,8 +41,30 @@ vi.mock('react-konva', () => {
       onMouseUp={(e: React.MouseEvent) => (onTransformEnd as ((event: unknown) => void) | undefined)?.({ evt: e.nativeEvent, target: node })}
     >{children as React.ReactNode}</button>;
   });
-  const Transformer = forwardRef((props: Record<string, unknown>, ref) => { transformerProps = props; useImperativeHandle(ref, () => ({ nodes: vi.fn(), getLayer: () => ({ batchDraw: vi.fn() }) })); return <div data-testid="transformer" />; });
-  return { Stage, Layer: Box, Group: Box, Rect: Box, Text: ({ text }: { text: string }) => <span>{text}</span>, Image, Transformer };
+  const Group = forwardRef(({ id, children, onClick, onPointerDown, onDragEnd, onTransformEnd, ...props }: Record<string, unknown>, ref) => {
+    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), scaleX: 1, scaleY: 1 });
+    const nodeRef = useRef<MockNode | null>(null);
+    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: () => geometry.current.width, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, setGeometry: (value) => Object.assign(geometry.current, value) };
+    const node = nodeRef.current;
+    if (id) nodeRefs.set(String(id), node);
+    useImperativeHandle(ref, () => node);
+    return <div data-testid={`item-${String(id)}`}
+      onPointerDown={(event: React.PointerEvent) => (onPointerDown as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, cancelBubble: false, target: node })}
+      onClick={(event: React.MouseEvent) => (onClick as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, cancelBubble: false, target: node })}
+      onDragEnd={(event: React.DragEvent) => (onDragEnd as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, target: node })}
+      onMouseUp={(event: React.MouseEvent) => (onTransformEnd as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, target: node })}
+    >{children as React.ReactNode}</div>;
+  });
+  const Transformer = forwardRef(({ onPointerDown, ...props }: Record<string, unknown>, ref) => {
+    transformerProps = props;
+    useImperativeHandle(ref, () => ({ nodes: (nodes: unknown[]) => transformerNodes.push(nodes), getLayer: () => ({ batchDraw: vi.fn() }) }));
+    return <div data-testid="transformer"><button data-testid="transformer-anchor" onPointerDown={(event: React.PointerEvent) => {
+      const konvaEvent = { evt: event.nativeEvent, cancelBubble: false, target: { id: () => itemId } };
+      (onPointerDown as ((value: typeof konvaEvent) => void) | undefined)?.(konvaEvent);
+      if (konvaEvent.cancelBubble) event.stopPropagation();
+    }} /></div>;
+  });
+  return { Stage, Layer: Box, Group, Rect: Box, Text: ({ text }: { text: string }) => <span>{text}</span>, Image, Transformer };
 });
 
 vi.mock('./konva-image', () => ({ acquireCanvasImage: vi.fn(() => Promise.resolve({})), releaseCanvasImage: vi.fn(), resetCanvasImageCache: vi.fn() }));
@@ -60,7 +86,7 @@ function props(overrides: Partial<React.ComponentProps<typeof BoardCanvas>> = {}
 
 describe('BoardCanvas', () => {
   beforeEach(() => {
-    nodeRefs.clear(); transformerProps = undefined; vi.clearAllMocks();
+    nodeRefs.clear(); transformerProps = undefined; transformerNodes = []; vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   });
   afterEach(() => { cleanup(); resetCanvasImageCache(); vi.unstubAllGlobals(); });
@@ -95,7 +121,7 @@ describe('BoardCanvas', () => {
 
   it('selects images and only clears empty clicks that did not pan', async () => {
     const value = props(); render(<BoardCanvas {...value} />); await act(async () => {});
-    fireEvent.click(screen.getByTestId(`image-${itemId}`));
+    fireEvent.click(screen.getByTestId(`item-${itemId}`));
     expect(value.onSelect).toHaveBeenCalledWith(itemId);
     fireEvent.pointerDown(screen.getByTestId('konva-stage'), { clientX: 10, clientY: 10 });
     fireEvent.pointerUp(screen.getByTestId('konva-stage'), { clientX: 11, clientY: 11 });
@@ -137,7 +163,7 @@ describe('BoardCanvas', () => {
 
   it('moves on drag end and configures a non-rotating four-handle transformer', async () => {
     const value = props({ selectedItemId: itemId }); render(<BoardCanvas {...value} />); await act(async () => {});
-    fireEvent.dragEnd(screen.getByTestId(`image-${itemId}`));
+    fireEvent.dragEnd(screen.getByTestId(`item-${itemId}`));
     expect(value.onMove).toHaveBeenCalledWith(itemId, { x: 30, y: 40 });
     expect(transformerProps).toMatchObject({ enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], rotateEnabled: false, keepRatio: true, flipEnabled: false });
   });
@@ -145,10 +171,42 @@ describe('BoardCanvas', () => {
   it('emits one normalized resize with position and scaled width', async () => {
     const value = props({ selectedItemId: itemId }); render(<BoardCanvas {...value} />); await act(async () => {});
     nodeRefs.get(itemId)?.setGeometry({ x: 18, y: 24, width: 100, scaleX: 0.5, scaleY: 0.5 });
-    fireEvent.mouseUp(screen.getByTestId(`image-${itemId}`));
+    fireEvent.mouseUp(screen.getByTestId(`item-${itemId}`));
     expect(value.onResize).toHaveBeenCalledWith(itemId, { x: 18, y: 24, width: 50 });
     expect(nodeRefs.get(itemId)?.scaleX()).toBe(1);
     expect(nodeRefs.get(itemId)?.scaleY()).toBe(1);
+  });
+
+  it('does not pan during a Transformer anchor gesture and still commits the resize', async () => {
+    const value = props({ selectedItemId: itemId }); render(<BoardCanvas {...value} />); await act(async () => {});
+    fireEvent.pointerDown(screen.getByTestId('transformer-anchor'), { clientX: 4, clientY: 5 });
+    fireEvent.pointerMove(screen.getByTestId('konva-stage'), { clientX: 12, clientY: 15 });
+    nodeRefs.get(itemId)?.setGeometry({ x: 18, y: 24, width: 100, scaleX: 0.5 });
+    fireEvent.mouseUp(screen.getByTestId(`item-${itemId}`));
+    expect(value.onPan).not.toHaveBeenCalled();
+    expect(value.onResize).toHaveBeenCalledWith(itemId, { x: 18, y: 24, width: 50 });
+  });
+
+  it('allows a deliberate item click after an empty-canvas pan', async () => {
+    const value = props(); render(<BoardCanvas {...value} />); await act(async () => {});
+    fireEvent.pointerDown(screen.getByTestId('konva-stage'), { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(screen.getByTestId('konva-stage'), { clientX: 8, clientY: 0 });
+    fireEvent.pointerUp(screen.getByTestId('konva-stage'), { clientX: 8, clientY: 0 });
+    fireEvent.pointerDown(screen.getByTestId(`item-${itemId}`), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByTestId(`item-${itemId}`));
+    expect(value.onSelect).toHaveBeenCalledWith(itemId);
+  });
+
+  it('keeps the Transformer attached when a selected loading placeholder becomes an image', async () => {
+    let resolveImage: (image: HTMLImageElement) => void = () => {};
+    vi.mocked(acquireCanvasImage).mockImplementationOnce(() => new Promise((resolve) => { resolveImage = resolve; }));
+    render(<BoardCanvas {...props({ selectedItemId: itemId })} />);
+    expect(screen.getByTestId(`item-${itemId}`)).toBeVisible();
+    expect(transformerNodes.at(-1)).toHaveLength(1);
+    const placeholderNode = transformerNodes.at(-1)?.[0];
+    await act(async () => { resolveImage({} as HTMLImageElement); });
+    expect(screen.queryByText(`Missing asset: ${assetId}`)).not.toBeInTheDocument();
+    expect(transformerNodes.at(-1)?.[0]).toBe(placeholderNode);
   });
 
   it('rejects only widths below the 24-world-unit minimum at both scale limits', () => {

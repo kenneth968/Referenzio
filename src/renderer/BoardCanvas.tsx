@@ -70,10 +70,11 @@ function CanvasItem({ item, filename, missing, cameraScale, interactionEnabled, 
     onDragEnd: onMove,
     onTransformEnd: onResize,
   };
-  if (!placeholder) return <KonvaImage {...common} image={image} ref={itemRef as never} />;
   return <Group {...common} ref={itemRef as never}>
-    <Rect width={item.width} height={item.height} stroke="#d92d20" strokeWidth={2 / cameraScale} fill="rgba(217,45,32,0.08)" />
-    <Text text={`Missing asset: ${item.assetId}`} width={item.width} height={item.height} fill="#d92d20" fontSize={Math.max(12 / cameraScale, 1)} padding={6 / cameraScale} />
+    {placeholder ? <>
+      <Rect width={item.width} height={item.height} stroke="#d92d20" strokeWidth={2 / cameraScale} fill="rgba(217,45,32,0.08)" />
+      <Text text={`Missing asset: ${item.assetId}`} width={item.width} height={item.height} fill="#d92d20" fontSize={Math.max(12 / cameraScale, 1)} padding={6 / cameraScale} />
+    </> : <KonvaImage image={image} width={item.width} height={item.height} />}
   </Group>;
 }
 
@@ -150,6 +151,7 @@ export function BoardCanvas({ document, selectedItemId, missingAssetIds, onSelec
   const stagePoint = () => stageRef.current?.getPointerPosition() ?? null;
   const onStagePointerDown = (event: Konva.KonvaEventObject<PointerEvent>) => {
     if (!interactionEnabled) return;
+    if (event.target !== stageRef.current) return;
     const point = stagePoint();
     if (!point) return;
     if (spacePressed) { event.evt.preventDefault(); startPan(point); return; }
@@ -157,11 +159,18 @@ export function BoardCanvas({ document, selectedItemId, missingAssetIds, onSelec
   };
   const onItemPointerDown = (event: Konva.KonvaEventObject<PointerEvent>) => {
     if (!interactionEnabled) return;
+    suppressItemClick.current = false;
     const point = stagePoint();
     if (!point) return;
     event.cancelBubble = true;
     if (spacePressed) { event.evt.preventDefault(); suppressItemClick.current = true; startPan(point); return; }
     gesture.current = { mode: 'item', itemId: event.target.id(), origin: point, last: point, moved: false };
+  };
+  const onTransformerPointerDown = (event: Konva.KonvaEventObject<PointerEvent>) => {
+    if (!interactionEnabled) return;
+    event.cancelBubble = true;
+    const point = stagePoint();
+    if (point && selectedItemId) gesture.current = { mode: 'item', itemId: selectedItemId, origin: point, last: point, moved: false };
   };
   const onStagePointerMove = () => {
     const active = gesture.current;
@@ -222,7 +231,7 @@ export function BoardCanvas({ document, selectedItemId, missingAssetIds, onSelec
         {items.map((item) => <CanvasItem key={item.id} item={item} filename={assetById.get(item.assetId)?.filename} missing={missingAssetIds.has(item.assetId)} cameraScale={document.camera.scale} interactionEnabled={interactionEnabled} panWithSpace={spacePressed} itemRef={(node) => { if (node) itemNodes.current.set(item.id, node); else itemNodes.current.delete(item.id); }} onItemPointerDown={onItemPointerDown} onSelect={onItemSelect(item.id)} onMove={onItemMove(item.id)} onResize={onItemResize(item.id)} />)}
       </Layer>
       <Layer x={document.camera.x} y={document.camera.y} scaleX={document.camera.scale} scaleY={document.camera.scale}>
-        <Transformer ref={transformerRef} enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']} rotateEnabled={false} keepRatio flipEnabled={false} boundBoxFunc={boundBoxFunc} />
+        <Transformer ref={transformerRef} onPointerDown={onTransformerPointerDown} enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']} rotateEnabled={false} keepRatio flipEnabled={false} boundBoxFunc={boundBoxFunc} />
       </Layer>
     </Stage>
   </div>;
