@@ -59,6 +59,18 @@ describe('App', () => {
     expect(window.referenzio.pasteClipboardImage).toHaveBeenCalledOnce();
   });
 
+  it('accepts an unshifted uppercase Ctrl+V event but ignores Ctrl+Shift+V', async () => {
+    installBridge();
+    render(<App />);
+    const host = await screen.findByTestId('canvas-host');
+    await waitFor(() => expect(host).toHaveFocus());
+
+    fireEvent.keyDown(host, { key: 'V', ctrlKey: true });
+    await waitFor(() => expect(window.referenzio.pasteClipboardImage).toHaveBeenCalledOnce());
+    fireEvent.keyDown(host, { key: 'v', ctrlKey: true, shiftKey: true });
+    expect(window.referenzio.pasteClipboardImage).toHaveBeenCalledOnce();
+  });
+
   it('converts a multi-file drop at the host-relative point and shows partial rejection feedback', async () => {
     installBridge();
     vi.mocked(window.referenzio.importDroppedImages).mockResolvedValue({

@@ -54,7 +54,7 @@ export default function App() {
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!interactionEnabled || isEditableTarget(event.target)) return;
     const key = event.key.toLowerCase();
-    if (event.ctrlKey && !event.altKey && !event.metaKey && key === 'v') {
+    if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === 'v') {
       event.preventDefault();
       pasteAtCenter();
     } else if (!event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && event.key === 'Home') {
