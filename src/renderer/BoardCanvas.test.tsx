@@ -3,7 +3,7 @@ import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BoardDocument } from '../shared/contracts';
 
-type MockNode = { id: () => string; x: () => number; y: () => number; width: () => number; scaleX: () => number; scaleY: () => number; scale: (value: { x: number; y: number }) => void; setGeometry: (value: Partial<{ x: number; y: number; width: number; scaleX: number; scaleY: number }>) => void };
+type MockNode = { id: () => string; x: () => number; y: () => number; width: (value?: number) => number; height: (value?: number) => number; position: (value?: { x: number; y: number }) => { x: number; y: number }; scaleX: () => number; scaleY: () => number; scale: (value: { x: number; y: number }) => void; getLayer: () => { batchDraw: () => void }; setGeometry: (value: Partial<{ x: number; y: number; width: number; scaleX: number; scaleY: number }>) => void };
 const nodeRefs = new Map<string, MockNode>();
 let transformerProps: Record<string, unknown> | undefined;
 let transformerNodes: unknown[][] = [];
@@ -21,6 +21,7 @@ vi.mock('react-konva', () => {
     const update = (nativeEvent: MouseEvent | PointerEvent | WheelEvent) => { pointer.current = { x: nativeEvent.clientX, y: nativeEvent.clientY }; };
     return <div data-testid="konva-stage"
       onWheel={(e: React.WheelEvent) => { update(e.nativeEvent); (onWheel as ((event: unknown) => void) | undefined)?.(event(e.nativeEvent)); }}
+      onPointerDownCapture={(e: React.PointerEvent) => { update(e.nativeEvent); }}
       onPointerDown={(e: React.PointerEvent) => { update(e.nativeEvent); (onPointerDown as ((event: unknown) => void) | undefined)?.(event(e.nativeEvent)); }}
       onPointerMove={(e: React.PointerEvent) => { update(e.nativeEvent); (onPointerMove as ((event: unknown) => void) | undefined)?.(event(e.nativeEvent)); }}
       onPointerUp={(e: React.PointerEvent) => { update(e.nativeEvent); (onPointerUp as ((event: unknown) => void) | undefined)?.(event(e.nativeEvent)); }}
@@ -28,9 +29,9 @@ vi.mock('react-konva', () => {
     >{children as React.ReactNode}</div>;
   });
   const Image = forwardRef(({ id, children, onClick, onPointerDown, onDragEnd, onTransformEnd, ...props }: Record<string, unknown>, ref) => {
-    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), scaleX: 1, scaleY: 1 });
+    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), height: Number(props.height ?? 0), scaleX: 1, scaleY: 1 });
     const nodeRef = useRef<MockNode | null>(null);
-    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: () => geometry.current.width, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, setGeometry: (value) => Object.assign(geometry.current, value) };
+    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: (value?: number) => { if (value !== undefined) geometry.current.width = value; return geometry.current.width; }, height: (value?: number) => { if (value !== undefined) geometry.current.height = value; return geometry.current.height; }, position: (value?: { x: number; y: number }) => { if (value) Object.assign(geometry.current, value); return { x: geometry.current.x, y: geometry.current.y }; }, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, getLayer: () => ({ batchDraw: () => {} }), setGeometry: (value) => Object.assign(geometry.current, value) };
     const node = nodeRef.current;
     if (id) nodeRefs.set(String(id), node);
     useImperativeHandle(ref, () => node);
@@ -42,14 +43,18 @@ vi.mock('react-konva', () => {
     >{children as React.ReactNode}</button>;
   });
   const Group = forwardRef(({ id, children, onClick, onPointerDown, onDragEnd, onTransformEnd, ...props }: Record<string, unknown>, ref) => {
-    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), scaleX: 1, scaleY: 1 });
+    const geometry = useRef({ x: Number(props.x ?? 0), y: Number(props.y ?? 0), width: Number(props.width ?? 0), height: Number(props.height ?? 0), scaleX: 1, scaleY: 1 });
     const nodeRef = useRef<MockNode | null>(null);
-    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: () => geometry.current.width, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, setGeometry: (value) => Object.assign(geometry.current, value) };
+    if (!nodeRef.current) nodeRef.current = { id: () => String(id), x: () => geometry.current.x, y: () => geometry.current.y, width: (value?: number) => { if (value !== undefined) geometry.current.width = value; return geometry.current.width; }, height: (value?: number) => { if (value !== undefined) geometry.current.height = value; return geometry.current.height; }, position: (value?: { x: number; y: number }) => { if (value) Object.assign(geometry.current, value); return { x: geometry.current.x, y: geometry.current.y }; }, scaleX: () => geometry.current.scaleX, scaleY: () => geometry.current.scaleY, scale: (value: { x: number; y: number }) => { geometry.current.scaleX = value.x; geometry.current.scaleY = value.y; }, getLayer: () => ({ batchDraw: () => {} }), setGeometry: (value) => Object.assign(geometry.current, value) };
     const node = nodeRef.current;
     if (id) nodeRefs.set(String(id), node);
     useImperativeHandle(ref, () => node);
     return <div data-testid={`item-${String(id)}`}
-      onPointerDown={(event: React.PointerEvent) => (onPointerDown as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, cancelBubble: false, target: node })}
+      onPointerDown={(event: React.PointerEvent) => {
+        const konvaEvent = { evt: event.nativeEvent, cancelBubble: false, target: { id: () => '' }, currentTarget: node };
+        (onPointerDown as ((value: typeof konvaEvent) => void) | undefined)?.(konvaEvent);
+        if (konvaEvent.cancelBubble) event.stopPropagation();
+      }}
       onClick={(event: React.MouseEvent) => (onClick as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, cancelBubble: false, target: node })}
       onDragEnd={(event: React.DragEvent) => (onDragEnd as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, target: node })}
       onMouseUp={(event: React.MouseEvent) => (onTransformEnd as ((value: unknown) => void) | undefined)?.({ evt: event.nativeEvent, target: node })}
@@ -195,6 +200,21 @@ describe('BoardCanvas', () => {
     fireEvent.pointerDown(screen.getByTestId(`item-${itemId}`), { clientX: 10, clientY: 10 });
     fireEvent.click(screen.getByTestId(`item-${itemId}`));
     expect(value.onSelect).toHaveBeenCalledWith(itemId);
+  });
+
+  it('restores a child-hit placement on blur, pointer cancellation, and disabled interaction', async () => {
+    const value = props(); const { rerender } = render(<BoardCanvas {...value} />); await act(async () => {});
+    const child = screen.getByTestId('image-undefined');
+    const node = nodeRefs.get(itemId)!;
+    const expectCommitted = () => {
+      expect(node.x()).toBe(30);
+      expect(node.y()).toBe(40);
+      expect(node.width()).toBe(100);
+      expect(node.height()).toBe(50);
+    };
+    fireEvent.pointerDown(child, { clientX: 1, clientY: 1 }); node.setGeometry({ x: 80, y: 90, width: 44 }); fireEvent.blur(window); expectCommitted();
+    fireEvent.pointerDown(child, { clientX: 1, clientY: 1 }); node.setGeometry({ x: 70, y: 90, width: 55 }); fireEvent.pointerCancel(screen.getByTestId('konva-stage')); expectCommitted();
+    fireEvent.pointerDown(child, { clientX: 1, clientY: 1 }); node.setGeometry({ x: 60, y: 90, width: 66 }); rerender(<BoardCanvas {...value} interactionEnabled={false} />); expectCommitted();
   });
 
   it('keeps the Transformer attached when a selected loading placeholder becomes an image', async () => {

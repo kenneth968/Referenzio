@@ -52,7 +52,7 @@ type CanvasItemProps = {
   interactionEnabled: boolean;
   panWithSpace: boolean;
   itemRef: (node: ItemNode | null) => void;
-  onItemPointerDown: (event: Konva.KonvaEventObject<PointerEvent>) => void;
+  onItemPointerDown: (itemId: string, event: Konva.KonvaEventObject<PointerEvent>) => void;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent>) => void;
   onMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
   onResize: (event: Konva.KonvaEventObject<Event>) => void;
@@ -65,7 +65,7 @@ function CanvasItem({ item, filename, missing, cameraScale, interactionEnabled, 
   const common = {
     id: item.id, x: item.x, y: item.y, width: item.width, height: item.height,
     draggable: interactionEnabled && !panWithSpace,
-    onPointerDown: onItemPointerDown,
+    onPointerDown: (event: Konva.KonvaEventObject<PointerEvent>) => onItemPointerDown(item.id, event),
     onClick: onSelect,
     onDragEnd: onMove,
     onTransformEnd: onResize,
@@ -157,14 +157,14 @@ export function BoardCanvas({ document, selectedItemId, missingAssetIds, onSelec
     if (spacePressed) { event.evt.preventDefault(); startPan(point); return; }
     startPan(point);
   };
-  const onItemPointerDown = (event: Konva.KonvaEventObject<PointerEvent>) => {
+  const onItemPointerDown = (itemId: string, event: Konva.KonvaEventObject<PointerEvent>) => {
     if (!interactionEnabled) return;
     suppressItemClick.current = false;
     const point = stagePoint();
     if (!point) return;
     event.cancelBubble = true;
     if (spacePressed) { event.evt.preventDefault(); suppressItemClick.current = true; startPan(point); return; }
-    gesture.current = { mode: 'item', itemId: event.target.id(), origin: point, last: point, moved: false };
+    gesture.current = { mode: 'item', itemId, origin: point, last: point, moved: false };
   };
   const onTransformerPointerDown = (event: Konva.KonvaEventObject<PointerEvent>) => {
     if (!interactionEnabled) return;
