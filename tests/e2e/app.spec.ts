@@ -206,7 +206,21 @@ test('real canvas pointer input changes persisted geometry, camera, z-order, and
     } finally { await close(app); }
     const persisted = await readPersistedBoard(testRoot);
     app = await launchReferenzio(testRoot);
-    try { await expect((await app.firstWindow()).getByTestId('board-canvas')).toHaveAttribute('data-item-count', String(persisted.items.length)); }
+    try {
+      const page = await app.firstWindow();
+      await expect(page.getByTestId('board-canvas')).toHaveAttribute('data-item-count', String(persisted.items.length));
+      const restarted = await readPersistedBoard(testRoot);
+      expect(restarted.camera).toEqual(persisted.camera);
+      expect(restarted.items.map(({ id, x, y, width, height, zIndex }) => ({ id, x, y, width, height, zIndex })))
+        .toEqual(persisted.items.map(({ id, x, y, width, height, zIndex }) => ({ id, x, y, width, height, zIndex })));
+      const bounds = await canvasBounds(page);
+      const visible = persisted.items[0];
+      const center = {
+        x: bounds.x + persisted.camera.x + (visible.x + visible.width / 2) * persisted.camera.scale,
+        y: bounds.y + persisted.camera.y + (visible.y + visible.height / 2) * persisted.camera.scale,
+      };
+      await expect.poll(() => samplePixel(page, center.x, center.y).then((pixel) => pixel[3])).toBe(255);
+    }
     finally { await close(app); }
   });
 });

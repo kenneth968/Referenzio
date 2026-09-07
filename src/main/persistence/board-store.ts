@@ -24,6 +24,7 @@ export class BoardStore {
   private highestRequestedRevision = 0;
   private needsPrimaryRepair = false;
   private hasValidPrimary = false;
+  private pendingRecovery: BoardDocument | undefined;
 
   public constructor(
     private readonly paths: PersistencePaths,
@@ -35,6 +36,7 @@ export class BoardStore {
     const primary = await this.readSnapshot(this.paths.board);
     if (primary.kind === 'valid') {
       this.setLoadedRevision(primary.document.revision, true, false);
+      this.pendingRecovery = undefined;
       return this.result(primary.document, 'primary', null);
     }
 
@@ -43,12 +45,12 @@ export class BoardStore {
     const backup = await this.readSnapshot(this.paths.backup);
     if (backup.kind === 'valid') {
       this.setLoadedRevision(backup.document.revision, false, true);
+      this.pendingRecovery = backup.document;
       let message = 'Recovered the board from its backup copy.';
       try {
         // A recovered backup repairs only the primary; it must never overwrite the backup.
         await writeDurableJson(this.paths.board, JSON.stringify(backup.document));
-        this.needsPrimaryRepair = false;
-        this.hasValidPrimary = true;
+        this.completePrimaryRepair(backup.document);
       } catch {
         message = 'Recovered the board from its backup copy, but the primary snapshot still needs repair.';
       }
@@ -56,6 +58,7 @@ export class BoardStore {
     }
 
     this.setLoadedRevision(0, false, false);
+    this.pendingRecovery = undefined;
     return this.result(
       emptyBoard(),
       'empty',
@@ -93,6 +96,7 @@ export class BoardStore {
         this.needsPrimaryRepair = false;
         this.hasValidPrimary = true;
         this.lastCommittedRevision = parsed.data.revision;
+        this.pendingRecovery = undefined;
         return { ok: true, value: { revision: parsed.data.revision } };
       } catch {
         this.needsPrimaryRepair = true;
@@ -103,6 +107,22 @@ export class BoardStore {
 
   public async flush(): Promise<Result<void>> {
     await this.queue;
+    const recovery = this.pendingRecovery;
+    if (this.needsPrimaryRepair && recovery && recovery.revision === this.highestRequestedRevision) {
+      const repaired = await this.enqueue(async () => {
+        const pending = this.pendingRecovery;
+        if (!this.needsPrimaryRepair || !pending || pending.revision !== this.highestRequestedRevision) return boardSaveFailure<void>();
+        try {
+          // Recovery writes only the primary; the validated backup remains untouched.
+          await writeDurableJson(this.paths.board, JSON.stringify(pending));
+          this.completePrimaryRepair(pending);
+          return { ok: true as const, value: undefined };
+        } catch {
+          return boardSaveFailure<void>();
+        }
+      });
+      if (!repaired.ok) return boardSaveFailure<void>();
+    }
     if (this.needsPrimaryRepair || this.lastCommittedRevision < this.highestRequestedRevision) return boardSaveFailure<void>();
     return { ok: true, value: undefined };
   }
@@ -200,6 +220,13 @@ export class BoardStore {
     this.highestRequestedRevision = revision;
     this.hasValidPrimary = hasValidPrimary;
     this.needsPrimaryRepair = needsPrimaryRepair;
+  }
+
+  private completePrimaryRepair(document: BoardDocument): void {
+    this.needsPrimaryRepair = false;
+    this.hasValidPrimary = true;
+    this.lastCommittedRevision = document.revision;
+    this.pendingRecovery = undefined;
   }
 }
 
