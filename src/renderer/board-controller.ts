@@ -21,6 +21,7 @@ export function useBoardController() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [missingAssetIds, setMissingAssetIds] = useState<string[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus>({ registered: false, message: null });
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
@@ -222,6 +223,7 @@ export function useBoardController() {
     setSaveState('saved');
     setMissingAssetIds(result.value.missingAssetIds);
     setLoadState(result.value.recovery !== 'primary' && result.value.recoveryMessage ? 'recovered' : 'ready');
+    setRecoveryMessage(result.value.recoveryMessage);
     replaceActionError('retry-load', null);
   };
   const applyRuntimeStatus = (result: Result<RuntimeStatus>, token: number, request: number) => {
@@ -379,7 +381,7 @@ export function useBoardController() {
   };
 
   return {
-    document, selectedItemId, missingAssetIds, loadState, saveState, shortcutStatus, alwaysOnTop, runtimeStatusReady, errors, isClosing, importProgress,
+    document, selectedItemId, missingAssetIds, loadState, recoveryMessage, saveState, shortcutStatus, alwaysOnTop, runtimeStatusReady, errors, isClosing, importProgress,
     selectItem: (itemId: string) => setSelectedItemId(itemId),
     clearSelection: () => setSelectedItemId(null),
     panCamera: (delta: Point) => editDocument((current) => ({ ...current, revision: current.revision + 1, camera: { ...current.camera, x: current.camera.x + delta.x, y: current.camera.y + delta.y } }), 'debounced'),

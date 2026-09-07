@@ -43,6 +43,18 @@ function dropEventWith(files: File[], point = { clientX: 200, clientY: 120 }) {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('App', () => {
+  it.each([
+    ['empty', 'Board snapshots could not be recovered. Open the library to inspect the preserved files.'],
+    ['backup', 'Recovered the board from its backup copy, but the primary snapshot still needs repair.'],
+  ] as const)('shows the actual %s recovery outcome', async (recovery, recoveryMessage) => {
+    installBridge();
+    vi.mocked(window.referenzio.loadBoard).mockResolvedValue({ ok: true, value: {
+      document: emptyBoard(), recovery, recoveryMessage, missingAssetIds: [],
+    } });
+    render(<App />);
+    expect(await screen.findByText(recoveryMessage)).toBeVisible();
+    expect(screen.queryByText('The board was recovered from a backup.')).not.toBeInTheDocument();
+  });
   it('focuses the ready canvas and pastes only while it owns focus', async () => {
     installBridge();
     const user = userEvent.setup();

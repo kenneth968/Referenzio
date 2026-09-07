@@ -103,6 +103,7 @@ export default function App() {
       isClosing={controller.isClosing}
       importProgress={controller.importProgress}
       recoveryVisible={recoveryVisible && controller.loadState === 'recovered'}
+      recoveryMessage={controller.recoveryMessage}
       shortcutMessage={shortcutVisible ? controller.shortcutStatus.message : null}
       errors={controller.errors}
       onRetrySave={controller.retrySave}
