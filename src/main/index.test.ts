@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const electron = vi.hoisted(() => ({
-  app: { requestSingleInstanceLock: vi.fn(() => false), quit: vi.fn(), whenReady: vi.fn() },
+  app: { requestSingleInstanceLock: vi.fn(() => false), quit: vi.fn(), whenReady: vi.fn(), on: vi.fn() },
   BrowserWindow: vi.fn(),
+  ipcMain: {},
+  shell: {},
   clipboard: { read: vi.fn() },
   dialog: { showErrorBox: vi.fn() },
   globalShortcut: { register: vi.fn(), unregisterAll: vi.fn() },
@@ -42,5 +44,33 @@ describe('Electron 44 clipboard adapter', () => {
 
     expect(jpeg.getType).toHaveBeenCalledWith('image/jpeg');
     expect(electron.nativeImage.createFromBuffer).toHaveBeenCalledWith(Buffer.from([4, 5]));
+  });
+});
+
+describe('startup board ownership', () => {
+  it('leaves the first board load and its recovery notice for the renderer', async () => {
+    vi.resetModules();
+    const persistence = { initialize: vi.fn().mockResolvedValue(undefined), loadBoard: vi.fn().mockResolvedValue({ recovery: 'backup' }) };
+    const createOrFocus = vi.fn().mockResolvedValue({ webContents: { isDestroyed: () => false, send: vi.fn() } });
+    vi.doMock('./persistence', () => ({ createPersistenceService: () => persistence }));
+    vi.doMock('./assets', () => ({ createAssetService: vi.fn() }));
+    vi.doMock('./security/asset-protocol', () => ({ registerAssetProtocol: vi.fn() }));
+    vi.doMock('./security/content-security-policy', () => ({ installContentSecurityPolicy: vi.fn() }));
+    vi.doMock('./ipc', () => ({ registerIpcHandlers: vi.fn(), createRendererFlushCoordinator: vi.fn() }));
+    vi.doMock('./window/controller', () => ({ createWindowController: () => ({
+      createOrFocus, getRuntimeStatus: () => ({ shortcut: { registered: true } }),
+    }) }));
+    electron.app.requestSingleInstanceLock.mockReturnValue(true);
+    electron.app.whenReady.mockResolvedValue(undefined);
+    try {
+      await import('./index');
+      await vi.waitFor(() => expect(createOrFocus).toHaveBeenCalledOnce());
+      expect(persistence.initialize).toHaveBeenCalledOnce();
+      expect(persistence.loadBoard).not.toHaveBeenCalled();
+    } finally {
+      electron.app.requestSingleInstanceLock.mockReturnValue(false);
+      for (const module of ['./persistence', './assets', './security/asset-protocol', './security/content-security-policy', './ipc', './window/controller']) vi.doUnmock(module);
+      vi.resetModules();
+    }
   });
 });

@@ -49,7 +49,6 @@ export function bootstrapApp(): void {
     const persistence = createPersistenceService({ libraryRoot: path.join(localAppData, 'Referenzio', 'library') });
     try {
       await persistence.initialize();
-      await persistence.loadBoard();
     } catch {
       dialog.showErrorBox('Referenzio could not start', 'The Referenzio library could not be initialized.');
       app.quit();
