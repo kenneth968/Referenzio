@@ -18,7 +18,7 @@ const validBoard = () => ({
 });
 
 describe('IPC capability boundary', () => {
-  function setup() {
+  function setup(rendererUrl = 'http://localhost:5173/') {
     const registeredHandlers = new Map<string, (...args: never[]) => unknown>();
     const registeredEvents = new Map<string, (...args: never[]) => unknown>();
     const persistence = {
@@ -46,12 +46,24 @@ describe('IPC capability boundary', () => {
       assets: assets as never,
       controller: controller as never,
       shell,
-      rendererUrl: 'http://localhost:5173/',
+      rendererUrl,
     });
     return { registeredHandlers, registeredEvents, persistence, assets, controller, shell };
   }
 
   const trustedEvent = () => ({ senderFrame: { url: 'http://localhost:5173/' } });
+
+  it('accepts only the exact packaged renderer file URL', async () => {
+    const rendererUrl = 'file:///C:/Referenzio/resources/app.asar/.vite/renderer/main_window/index.html';
+    const { registeredHandlers, persistence } = setup(rendererUrl);
+    const load = (url: string) => registeredHandlers.get('board:load')!({ senderFrame: { url } } as never);
+    for (const url of [rendererUrl.replace('index.html', 'other.html'), `${rendererUrl}?other=1`, 'file:///C:/unrelated/index.html']) {
+      await expect(load(url)).resolves.toMatchObject({ ok: false, error: { code: 'UNTRUSTED_SENDER' } });
+    }
+    expect(persistence.loadBoard).not.toHaveBeenCalled();
+    await expect(load(rendererUrl)).resolves.toMatchObject({ ok: true });
+    expect(persistence.loadBoard).toHaveBeenCalledOnce();
+  });
 
   it('rejects a renderer save with an unknown asset reference before persistence runs', async () => {
     const { registeredHandlers, persistence } = setup();
@@ -191,6 +203,7 @@ describe('preload bridge', () => {
       loadBoard(): Promise<unknown>;
       importDroppedImages(files: File[]): Promise<unknown>;
       onShortcutStatus(listener: (status: unknown) => void): () => void;
+      onMainError(listener: (error: unknown) => void): () => void;
       onFlushRequest(listener: () => Promise<{ ok: true; value: { revision: number } }>): () => void;
     };
   }
@@ -262,6 +275,22 @@ describe('preload bridge', () => {
     });
     cleanup();
     expect(electron.ipcRenderer.removeListener).toHaveBeenCalledWith('app:flush-request', callback);
+  });
+
+  it('validates main errors and removes the same subscribed callback', async () => {
+    const api = await exposedApi();
+    const listener = vi.fn();
+    const cleanup = api.onMainError(listener);
+    const [channel, callback] = electron.ipcRenderer.on.mock.calls.at(-1)!;
+    expect(channel).toBe('app:error');
+    const error = { code: 'CLOSE_FAILED', message: 'Try closing again.', action: 'retry-close' };
+    callback({}, { ...error, action: 'invented-action' });
+    callback({}, { ...error, message: 42 });
+    expect(listener).not.toHaveBeenCalled();
+    callback({}, error);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(error);
+    cleanup();
+    expect(electron.ipcRenderer.removeListener).toHaveBeenCalledWith('app:error', callback);
   });
 });
 
