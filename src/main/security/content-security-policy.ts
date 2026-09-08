@@ -3,7 +3,7 @@ import type { Session } from 'electron';
 const policy = (isPackaged: boolean): string => [
   "default-src 'self'",
   isPackaged ? "script-src 'self'" : "script-src 'self' 'unsafe-eval' http://localhost:*",
-  isPackaged ? "style-src 'self'" : "style-src 'self' http://localhost:*",
+  isPackaged ? "style-src 'self'" : "style-src 'self' 'unsafe-inline' http://localhost:*",
   "img-src 'self' data: blob: referenzio-asset:",
   isPackaged ? "connect-src 'self'" : "connect-src 'self' http://localhost:* ws://localhost:*",
   "object-src 'none'",

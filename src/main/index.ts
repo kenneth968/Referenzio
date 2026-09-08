@@ -91,6 +91,9 @@ export function bootstrapApp(): void {
 
     app.on('second-instance', () => { void controller.createOrFocus(); });
     app.on('activate', () => { void controller.createOrFocus(); });
+  }).catch(() => {
+    dialog.showErrorBox('Referenzio could not start', 'The Referenzio window could not be created.');
+    app.quit();
   });
 }
 

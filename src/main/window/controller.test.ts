@@ -17,6 +17,7 @@ function setup({ flushRenderer = vi.fn().mockResolvedValue({ ok: true, value: un
     isVisible: vi.fn(() => true), isFocused: vi.fn(() => false),
     isMinimized: vi.fn(() => false), show: vi.fn(), focus: vi.fn(), restore: vi.fn(), hide: vi.fn(),
     minimize: vi.fn(), setAlwaysOnTop: vi.fn(), getNormalBounds: vi.fn(() => settings.bounds), destroy: vi.fn(),
+    loadURL: vi.fn().mockResolvedValue(undefined), loadFile: vi.fn().mockResolvedValue(undefined),
   };
   const BrowserWindow = vi.fn(function BrowserWindowFake() { return window; });
   const persistence = {
@@ -76,6 +77,23 @@ describe('window controller', () => {
     await expect(controller.setPinned(false)).resolves.toEqual({ ok: true, value: undefined });
     expect(window.setAlwaysOnTop).toHaveBeenCalledWith(false);
     expect(persistence.saveSettings).toHaveBeenLastCalledWith(expect.objectContaining({ alwaysOnTop: false }));
+  });
+
+  it('waits for the initial renderer navigation before resolving window creation', async () => {
+    let resolveNavigation!: () => void;
+    const navigation = new Promise<void>((resolve) => { resolveNavigation = resolve; });
+    const { controller, window } = setup();
+    window.loadFile.mockReturnValue(navigation);
+
+    let settled = false;
+    const creating = controller.createOrFocus().then(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(window.loadFile).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+
+    resolveNavigation();
+    await creating;
+    expect(settled).toBe(true);
   });
 
   it('debounces move persistence for 300ms and flushes the latest normal bounds on close', async () => {
@@ -155,6 +173,7 @@ describe('main-process security boundaries', () => {
     expect(contentSecurityPolicy(true)).not.toContain('http:');
     expect(contentSecurityPolicy(true)).not.toContain('https:');
     expect(contentSecurityPolicy(false)).toContain("script-src 'self' 'unsafe-eval' http://localhost:*");
+    expect(contentSecurityPolicy(false)).toContain("style-src 'self' 'unsafe-inline' http://localhost:*");
     expect(contentSecurityPolicy(false)).toContain('connect-src \'self\' http://localhost:* ws://localhost:*');
     expect(contentSecurityPolicy(false)).not.toMatch(/img-src[^;]*http/);
   });

@@ -37,4 +37,17 @@ describe('application scaffold', () => {
     expect(pkg.dependencies.react).toBe('19.2.8');
     expect(pkg.dependencies['react-konva']).toBe('19.2.5');
   });
+
+  it('keeps locked runtime dependencies in packaged output while pruning dev dependencies', () => {
+    const packagerConfig = config.packagerConfig as {
+      prune?: boolean;
+      ignore?: (file: string) => boolean;
+      asar?: { unpack?: string };
+    };
+
+    expect(packagerConfig.prune).toBe(false);
+    expect(packagerConfig.ignore?.('/node_modules/sharp')).toBe(false);
+    expect(packagerConfig.ignore?.('/node_modules/vitest')).toBe(true);
+    expect(packagerConfig.asar).toEqual({ unpack: '**/node_modules/@img/**/*' });
+  });
 });
