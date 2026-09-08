@@ -11,7 +11,7 @@ type ClipboardImage = {
   toPNG(): Uint8Array;
 };
 
-export type AssetClipboard = { readImage(): ClipboardImage };
+export type AssetClipboard = { captureImage(): Promise<ClipboardImage | undefined> };
 export type AssetPersistence = Pick<PersistenceService, 'writeAsset' | 'assetPath'>;
 export type AssetService = {
   pasteClipboardImage(): Promise<Result<Asset>>;
@@ -95,8 +95,13 @@ export function createAssetService({ persistence, clipboard, now = () => new Dat
 
   return {
     async pasteClipboardImage() {
-      const image = clipboard.readImage();
-      if (image.isEmpty()) return { ok: false, error: errors.clipboardEmpty() };
+      let image: ClipboardImage | undefined;
+      try {
+        image = await clipboard.captureImage();
+      } catch {
+        return { ok: false, error: errors.clipboardInvalid() };
+      }
+      if (!image || image.isEmpty()) return { ok: false, error: errors.clipboardEmpty() };
       const size = image.getSize();
       if (!isWithinPixelLimit(size.width, size.height)) return { ok: false, error: errors.clipboardTooLarge() };
       const bytes = image.toPNG();
