@@ -103,7 +103,7 @@ describe('persistence service', () => {
     expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).toMatchObject({ revision: 4 });
   });
 
-  it('retries the same revision after backup repair initially fails', async () => {
+  it('flush retries a recovered revision after primary repair initially fails without changing the board', async () => {
     const { root, service } = await createService();
     const recovered = validBoard({ revision: 7 });
     await writeFile(join(root, 'board.json'), '{broken');
@@ -114,9 +114,28 @@ describe('persistence service', () => {
     expect(await service.flush()).toMatchObject({ ok: false, error: { code: 'BOARD_SAVE_FAILED' } });
 
     atomicFault.failPrimaryRepair = false;
-    expect(await service.saveBoard(recovered)).toMatchObject({ ok: true, value: { revision: 7 } });
     expect(await service.flush()).toMatchObject({ ok: true });
     expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).toEqual(recovered);
+    expect(JSON.parse(await readFile(join(root, 'board.backup.json'), 'utf8'))).toEqual(recovered);
+    const restarted = createPersistenceService({ libraryRoot: root, now });
+    await restarted.initialize();
+    expect(await restarted.loadBoard()).toMatchObject({ recovery: 'primary', document: recovered });
+  });
+
+  it('does not let a newer committed snapshot be overwritten by a pending recovered revision', async () => {
+    const { root, service } = await createService();
+    const recovered = validBoard({ revision: 7 });
+    const newer = { ...validBoard({ revision: 8 }), camera: { x: 42, y: -8, scale: 1.1 } };
+    await writeFile(join(root, 'board.json'), '{broken');
+    await writeFile(join(root, 'board.backup.json'), JSON.stringify(recovered));
+    atomicFault.failPrimaryRepair = true;
+
+    expect(await service.loadBoard()).toMatchObject({ recovery: 'backup', document: recovered });
+    atomicFault.failPrimaryRepair = false;
+    expect(await service.saveBoard(newer)).toMatchObject({ ok: true, value: { revision: 8 } });
+    expect(await service.flush()).toMatchObject({ ok: true });
+    expect(JSON.parse(await readFile(join(root, 'board.json'), 'utf8'))).toEqual(newer);
+    expect(JSON.parse(await readFile(join(root, 'board.backup.json'), 'utf8'))).toEqual(recovered);
   });
 
   it('propagates primary read I/O failures without creating an empty board', async () => {

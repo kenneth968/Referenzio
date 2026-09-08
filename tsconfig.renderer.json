@@ -2,7 +2,7 @@
   "compilerOptions": {
     "composite": true,
     "noEmit": true,
-    "target": "ES2022",
+    "target": "ES2024",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["vitest/globals"]
   },
-  "include": ["vite.renderer.config.ts", "vitest.config.ts", "playwright.config.ts", "src/renderer/**/*.ts", "src/renderer/**/*.tsx", "tests/e2e/**/*.ts"]
+  "include": ["vite.renderer.config.ts", "vitest.config.ts", "playwright.config.ts", "src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts", "tests/e2e/**/*.ts"]
 }
