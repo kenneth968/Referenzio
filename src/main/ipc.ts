@@ -42,9 +42,11 @@ const untrustedSender = (): Result<never> => ({
   error: { code: 'UNTRUSTED_SENDER', message: 'The request was not sent by the Referenzio window.', action: 'dismiss' },
 });
 
-const serviceFailure = (): Result<never> => ({
+type ServiceFailureAction = 'retry-load' | 'retry-save';
+
+const serviceFailure = (action: ServiceFailureAction = 'retry-save'): Result<never> => ({
   ok: false,
-  error: { code: 'SERVICE_FAILED', message: 'The request could not be completed.', action: 'retry-save' },
+  error: { code: 'SERVICE_FAILED', message: 'The request could not be completed.', action },
 });
 
 const flushTimeout = (): Result<void> => ({
@@ -76,6 +78,7 @@ function registerHandler<Input, Output>(
   schema: { safeParse(value: unknown): { success: true; data: Input } | { success: false } },
   rendererUrl: string | undefined,
   operation: (input: Input) => Promise<Result<Output>> | Result<Output>,
+  failureAction: ServiceFailureAction = 'retry-save',
 ): void {
   ipcMain.handle(channel, async (event, payload): Promise<Result<Output>> => {
     if (!isTrustedRenderer(event, rendererUrl)) return untrustedSender();
@@ -84,7 +87,7 @@ function registerHandler<Input, Output>(
     try {
       return await operation(parsed.data);
     } catch {
-      return serviceFailure();
+      return serviceFailure(failureAction);
     }
   });
 }
@@ -92,11 +95,13 @@ function registerHandler<Input, Output>(
 /** Registers the entire renderer-facing capability surface in one place. */
 export function registerIpcHandlers(dependencies: IpcHandlerDependencies): void {
   const { ipcMain, persistence, assets, controller, shell, rendererUrl } = dependencies;
+  let boardLoadInFlight: Promise<LoadBoardResult> | undefined;
 
   registerHandler(ipcMain, 'board:load', PasteRequestSchema, rendererUrl, async () => {
-    const value: LoadBoardResult = await persistence.loadBoard();
+    const load = boardLoadInFlight ?? (boardLoadInFlight = persistence.loadBoard().finally(() => { boardLoadInFlight = undefined; }));
+    const value: LoadBoardResult = await load;
     return { ok: true, value };
-  });
+  }, 'retry-load');
   registerHandler(ipcMain, 'app:runtime-status', PasteRequestSchema, rendererUrl, () => ({
     ok: true,
     value: controller.getRuntimeStatus(),

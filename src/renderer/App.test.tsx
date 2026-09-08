@@ -6,8 +6,8 @@ import { emptyBoard } from '../shared/board';
 import App from './App';
 
 vi.mock('./BoardCanvas', () => ({
-  BoardCanvas: ({ onClearSelection }: { onClearSelection: () => void }) => (
-    <div data-testid="board-canvas" onPointerDown={onClearSelection} />
+  BoardCanvas: ({ onClearSelection, spacePressed }: { onClearSelection: () => void; spacePressed: boolean }) => (
+    <div data-testid="board-canvas" data-space-pressed={spacePressed} onPointerDown={onClearSelection} />
   ),
 }));
 
@@ -81,6 +81,18 @@ describe('App', () => {
     await waitFor(() => expect(window.referenzio.pasteClipboardImage).toHaveBeenCalledOnce());
     fireEvent.keyDown(host, { key: 'v', ctrlKey: true, shiftKey: true });
     expect(window.referenzio.pasteClipboardImage).toHaveBeenCalledOnce();
+  });
+
+  it('clears Space pan mode when the canvas loses focus before keyup', async () => {
+    installBridge();
+    render(<App />);
+    const host = await screen.findByTestId('canvas-host');
+    await waitFor(() => expect(host).toHaveFocus());
+
+    fireEvent.keyDown(host, { code: 'Space', key: ' ' });
+    expect(screen.getByTestId('board-canvas')).toHaveAttribute('data-space-pressed', 'true');
+    fireEvent.blur(host);
+    expect(screen.getByTestId('board-canvas')).toHaveAttribute('data-space-pressed', 'false');
   });
 
   it('converts a multi-file drop at the host-relative point and shows partial rejection feedback', async () => {

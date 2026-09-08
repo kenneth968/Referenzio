@@ -231,7 +231,7 @@ export function BoardCanvas({ document, selectedItemId, missingAssetIds, onSelec
         {items.map((item) => <CanvasItem key={item.id} item={item} filename={assetById.get(item.assetId)?.filename} missing={missingAssetIds.has(item.assetId)} cameraScale={document.camera.scale} interactionEnabled={interactionEnabled} panWithSpace={spacePressed} itemRef={(node) => { if (node) itemNodes.current.set(item.id, node); else itemNodes.current.delete(item.id); }} onItemPointerDown={onItemPointerDown} onSelect={onItemSelect(item.id)} onMove={onItemMove(item.id)} onResize={onItemResize(item.id)} />)}
       </Layer>
       <Layer x={document.camera.x} y={document.camera.y} scaleX={document.camera.scale} scaleY={document.camera.scale}>
-        <Transformer ref={transformerRef} onPointerDown={onTransformerPointerDown} enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']} rotateEnabled={false} keepRatio flipEnabled={false} boundBoxFunc={boundBoxFunc} />
+        <Transformer ref={transformerRef} onPointerDown={onTransformerPointerDown} listening={interactionEnabled} enabledAnchors={interactionEnabled ? ['top-left', 'top-right', 'bottom-left', 'bottom-right'] : []} rotateEnabled={false} keepRatio flipEnabled={false} boundBoxFunc={boundBoxFunc} />
       </Layer>
     </Stage>
   </div>;

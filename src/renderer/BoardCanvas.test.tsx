@@ -166,6 +166,11 @@ describe('BoardCanvas', () => {
     expect(value.onPan).not.toHaveBeenCalled();
   });
 
+  it('disables Transformer interaction while the canvas is blocked', () => {
+    render(<BoardCanvas {...props({ selectedItemId: itemId, interactionEnabled: false })} />);
+    expect(transformerProps).toMatchObject({ enabledAnchors: [], listening: false });
+  });
+
   it('moves on drag end and configures a non-rotating four-handle transformer', async () => {
     const value = props({ selectedItemId: itemId }); render(<BoardCanvas {...value} />); await act(async () => {});
     fireEvent.dragEnd(screen.getByTestId(`item-${itemId}`));

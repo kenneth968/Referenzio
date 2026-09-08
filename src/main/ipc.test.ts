@@ -102,6 +102,42 @@ describe('IPC capability boundary', () => {
     expect(shell.openPath).toHaveBeenCalledWith('C:\\Referenzio');
   });
 
+  it('shares concurrent board loads while the first persistence read is pending', async () => {
+    const { registeredHandlers, persistence } = setup();
+    let resolvePending!: (value: {
+      document: ReturnType<typeof validBoard>;
+      recovery: 'primary';
+      recoveryMessage: null;
+      missingAssetIds: string[];
+    }) => void;
+    const pending = new Promise<{
+      document: ReturnType<typeof validBoard>;
+      recovery: 'primary';
+      recoveryMessage: null;
+      missingAssetIds: string[];
+    }>((resolve) => { resolvePending = resolve; });
+    persistence.loadBoard.mockReturnValueOnce(pending);
+
+    const load = () => registeredHandlers.get('board:load')!(trustedEvent() as never, undefined as never);
+    const first = load();
+    const second = load();
+    expect(persistence.loadBoard).toHaveBeenCalledOnce();
+
+    resolvePending({ document: validBoard(), recovery: 'primary', recoveryMessage: null, missingAssetIds: [] });
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await expect(second).resolves.toMatchObject({ ok: true });
+  });
+
+  it('returns a load retry action when board persistence fails', async () => {
+    const { registeredHandlers, persistence } = setup();
+    persistence.loadBoard.mockRejectedValueOnce(new Error('read failed'));
+
+    await expect(registeredHandlers.get('board:load')!(trustedEvent() as never, undefined as never)).resolves.toEqual({
+      ok: false,
+      error: { code: 'SERVICE_FAILED', message: 'The request could not be completed.', action: 'retry-load' },
+    });
+  });
+
   it('rejects an untrusted sender before every service call', async () => {
     const { registeredHandlers, persistence, assets, controller, shell } = setup();
     const result = await registeredHandlers.get('assets:import-drop')!({ senderFrame: { url: 'https://evil.example/' } } as never, ['C:\\drop.png'] as never);

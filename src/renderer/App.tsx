@@ -117,6 +117,7 @@ export default function App() {
       ref={hostRef}
       tabIndex={0}
       onPointerDownCapture={() => hostRef.current?.focus()}
+      onBlur={() => setSpacePressed(false)}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onDragOver={(event) => event.preventDefault()}
