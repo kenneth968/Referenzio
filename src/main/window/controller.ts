@@ -168,9 +168,9 @@ export function createWindowController(dependencies: ControllerDependencies): Wi
     const devServerUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'undefined' ? undefined : MAIN_WINDOW_VITE_DEV_SERVER_URL;
     const rendererName = typeof MAIN_WINDOW_VITE_NAME === 'undefined' ? 'main_window' : MAIN_WINDOW_VITE_NAME;
     if (devServerUrl) {
-      void createdWindow.loadURL?.(devServerUrl);
+      await createdWindow.loadURL?.(devServerUrl);
     } else {
-      void createdWindow.loadFile?.(path.join(__dirname, '../renderer', rendererName, 'index.html'));
+      await createdWindow.loadFile?.(path.join(__dirname, '../renderer', rendererName, 'index.html'));
     }
     if (!shortcutRegistered) {
       shortcutRegistered = dependencies.globalShortcut.register('Ctrl+Shift+Space', () => toggleVisibility());
