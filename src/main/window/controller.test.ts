@@ -155,6 +155,7 @@ describe('main-process security boundaries', () => {
     expect(contentSecurityPolicy(true)).not.toContain('http:');
     expect(contentSecurityPolicy(true)).not.toContain('https:');
     expect(contentSecurityPolicy(false)).toContain("script-src 'self' 'unsafe-eval' http://localhost:*");
+    expect(contentSecurityPolicy(false)).toContain("style-src 'self' 'unsafe-inline' http://localhost:*");
     expect(contentSecurityPolicy(false)).toContain('connect-src \'self\' http://localhost:* ws://localhost:*');
     expect(contentSecurityPolicy(false)).not.toMatch(/img-src[^;]*http/);
   });

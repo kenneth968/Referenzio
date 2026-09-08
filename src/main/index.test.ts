@@ -43,4 +43,35 @@ describe('Electron 44 clipboard adapter', () => {
     expect(jpeg.getType).toHaveBeenCalledWith('image/jpeg');
     expect(electron.nativeImage.createFromBuffer).toHaveBeenCalledWith(Buffer.from([4, 5]));
   });
+
+  it('reports a failure when the initial window cannot be created', async () => {
+    vi.resetModules();
+    electron.app.requestSingleInstanceLock.mockReturnValue(true);
+    electron.app.whenReady.mockResolvedValue(undefined);
+    electron.app.quit.mockClear();
+    electron.dialog.showErrorBox.mockClear();
+    process.env.LOCALAPPDATA = 'C:\\Referenzio-test';
+
+    vi.doMock('./persistence', () => ({
+      createPersistenceService: () => ({
+        initialize: vi.fn().mockResolvedValue(undefined),
+        loadBoard: vi.fn().mockResolvedValue(undefined),
+      }),
+    }));
+    vi.doMock('./assets', () => ({ createAssetService: vi.fn(() => ({})) }));
+    vi.doMock('./security/asset-protocol', () => ({ registerAssetProtocol: vi.fn() }));
+    vi.doMock('./security/content-security-policy', () => ({ installContentSecurityPolicy: vi.fn() }));
+    vi.doMock('./window/controller', () => ({
+      createWindowController: () => ({ createOrFocus: vi.fn().mockRejectedValue(new Error('window failed')) }),
+    }));
+
+    await import('./index');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(electron.dialog.showErrorBox).toHaveBeenCalledWith(
+      'Referenzio could not start',
+      'The Referenzio window could not be created.',
+    );
+    expect(electron.app.quit).toHaveBeenCalled();
+  });
 });
